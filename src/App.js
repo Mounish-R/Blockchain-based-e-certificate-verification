@@ -1,16 +1,18 @@
 import React, { useState } from "react";
 import { ethers } from "ethers";
-import DocVerify from "./contracts/DocVerify.json"; // 👈 We'll place ABI here
+import DocVerify from "./contracts/DocVerify.json";
+import { QRCodeCanvas } from "qrcode.react";
 import "./App.css";
 
-// 🔁 Replace this with your deployed contract address
 const contractAddress = "0x5fbdb2315678afecb367f032d93f642f64180aa3";
 
 function App() {
-  const [file, setFile] = useState(null);
-  const [status, setStatus] = useState("");
+  const [uploadFile, setUploadFile] = useState(null);
+  const [verifyFile, setVerifyFile] = useState(null);
+  const [uploadStatus, setUploadStatus] = useState("");
+  const [verifyStatus, setVerifyStatus] = useState("");
+  const [qrHash, setQrHash] = useState("");
 
-  // 🔐 SHA-256 hashing function
   const getFileHash = async (file) => {
     const buffer = await file.arrayBuffer();
     const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
@@ -19,7 +21,6 @@ function App() {
     return "0x" + hashHex;
   };
 
-  // 🔌 Connect to MetaMask & get signer
   const getSigner = async () => {
     if (!window.ethereum) {
       alert("MetaMask is required");
@@ -30,48 +31,78 @@ function App() {
     return provider.getSigner();
   };
 
-  // ⬆️ Upload Certificate
   const uploadDocument = async () => {
-    if (!file) return alert("Please select a file first.");
-    const hash = await getFileHash(file);
+    if (!uploadFile) return alert("Please select a file to upload.");
+    const hash = await getFileHash(uploadFile);
     const signer = await getSigner();
     const contract = new ethers.Contract(contractAddress, DocVerify.abi, signer);
 
     try {
       const tx = await contract.addDocumentHash(hash);
       await tx.wait();
-      setStatus("✅ Certificate added to blockchain.");
+      setUploadStatus("✅ Certificate added to blockchain.");
+      setQrHash(hash);
     } catch (err) {
-      setStatus("❌ Error adding certificate.");
+      setUploadStatus("❌ Error adding certificate.");
+      setQrHash("");
       console.error(err);
     }
   };
 
-  // ✅ Verify Certificate
   const verifyDocument = async () => {
-    if (!file) return alert("Please select a file first.");
-    const hash = await getFileHash(file);
+    if (!verifyFile) return alert("Please select a file to verify.");
+    const hash = await getFileHash(verifyFile);
     const signer = await getSigner();
     const contract = new ethers.Contract(contractAddress, DocVerify.abi, signer);
 
     try {
       const isValid = await contract.verifyDocument(hash);
-      setStatus(isValid ? "✅ Certificate is VALID." : "❌ Certificate is INVALID.");
+      setVerifyStatus(isValid ? "✅ Certificate is VALID." : "❌ Certificate is INVALID.");
     } catch (err) {
-      setStatus("❌ Error verifying certificate.");
+      setVerifyStatus("❌ Error verifying certificate.");
       console.error(err);
     }
   };
 
   return (
-    <div className="app">
-      <h1>🎓 University Certificate Verification</h1>
-      <input type="file" onChange={(e) => setFile(e.target.files[0])} />
-      <div className="btn-group">
-        <button onClick={uploadDocument}>Add to Blockchain</button>
-        <button onClick={verifyDocument}>Verify Certificate</button>
+    <div className="container">
+      <h1>🎓 Blockchain Certificate System</h1>
+      <div className="grid">
+        {/* Upload Section */}
+        <div className="section">
+          <h2>⬆️ Add Certificate</h2>
+          <input type="file" onChange={(e) => {
+            setUploadFile(e.target.files[0]);
+            setUploadStatus("");
+            setQrHash("");
+          }} />
+          <button onClick={uploadDocument}>Add to Blockchain</button>
+          <p>{uploadStatus}</p>
+
+          {qrHash && (
+            <div>
+              <h4>Scan QR to Verify</h4>
+              <QRCodeCanvas
+                value={`http://localhost:3000/verify?hash=${qrHash}`}
+                size={200}
+                includeMargin
+              />
+              <p style={{ fontSize: "12px", wordBreak: "break-word" }}>{qrHash}</p>
+            </div>
+          )}
+        </div>
+
+        {/* Verify Section */}
+        <div className="section">
+          <h2>🔍 Verify Certificate</h2>
+          <input type="file" onChange={(e) => {
+            setVerifyFile(e.target.files[0]);
+            setVerifyStatus("");
+          }} />
+          <button onClick={verifyDocument}>Verify Certificate</button>
+          <p>{verifyStatus}</p>
+        </div>
       </div>
-      <p>{status}</p>
     </div>
   );
 }
