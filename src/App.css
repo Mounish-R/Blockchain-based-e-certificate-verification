@@ -1,46 +1,89 @@
+/* === General Page Styling === */
 body {
-  font-family: Arial, sans-serif;
-  background-color: #f4f4f4;
+  margin: 0;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background-color: #f5f7fa;
+  color: #333;
 }
 
-.container {
-  text-align: center;
-  padding: 20px;
-}
-
-.grid {
+/* === Navigation Bar === */
+.nav {
+  background-color: #1e1e2f;
+  padding: 15px 20px;
   display: flex;
-  justify-content: space-around;
-  margin-top: 40px;
-  flex-wrap: wrap;
+  justify-content: center;
+  gap: 30px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
 }
 
-.section {
-  background-color: #fff;
-  padding: 25px;
-  border-radius: 12px;
-  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-  width: 350px;
+.nav a {
+  color: white;
+  text-decoration: none;
+  font-weight: bold;
+  font-size: 16px;
+  transition: color 0.2s ease;
 }
 
-button {
+.nav a:hover {
+  color: #00d1ff;
+}
+
+/* === Page Container === */
+.page {
+  padding: 40px 20px;
+  text-align: center;
+}
+
+/* === Headings === */
+h1 {
+  font-size: 28px;
+  margin-bottom: 25px;
+  color: #2c3e50;
+}
+
+h3 {
+  margin-top: 25px;
+  color: #007bfc;
+}
+
+/* === File Input === */
+input[type="file"] {
   margin-top: 15px;
-  padding: 10px 20px;
+  font-size: 14px;
+}
+
+/* === Buttons === */
+button {
+  margin-top: 20px;
+  padding: 12px 24px;
   background-color: #007bfc;
   color: white;
   border: none;
   border-radius: 8px;
   cursor: pointer;
+  font-size: 15px;
+  transition: background-color 0.2s ease;
 }
 
 button:hover {
   background-color: #005ac4;
 }
 
-input[type="file"] {
-  margin-top: 10px;
+/* === Status Text === */
+p {
+  margin-top: 15px;
+  font-size: 14px;
 }
 
-p {
+/* === QR Code Styling === */
+.qr-section {
+  margin-top: 20px;
+  padding: 10px;
+}
+
+.qr-section p {
+  word-break: break-word;
+  font-size: 12px;
   margin-top: 10px;
+  color: #555;
 }
