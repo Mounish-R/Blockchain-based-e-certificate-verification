@@ -5,6 +5,7 @@ import AddPage from "./pages/AddPage";
 import VerifyPage from "./pages/VerifyPage";
 import "./App.css";
 
+
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(
   <BrowserRouter>

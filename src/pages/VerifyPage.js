@@ -6,11 +6,13 @@ import { QRCodeCanvas } from "qrcode.react";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 
-// Replace with your deployed contract address
-const contractAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
+
+
+const contractAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3"; // Replace with your deployed address
 
 function VerifyPage() {
   const [file, setFile] = useState(null);
+  const [fileURL, setFileURL] = useState(null); // Preview uploaded file
   const [status, setStatus] = useState("");
   const [student, setStudent] = useState(null);
   const [manualHash, setManualHash] = useState("");
@@ -79,20 +81,34 @@ function VerifyPage() {
   };
 
   const downloadPDF = async () => {
-    const input = certificateRef.current;
-    const canvas = await html2canvas(input, {
-      scale: 3, // High-res export
+    const pdf = new jsPDF("p", "mm", "a4");
+
+    // Page 1: Uploaded file (image or note)
+    if (file && file.type.startsWith("image/")) {
+      const img = new Image();
+      img.src = fileURL;
+      await new Promise((resolve) => {
+        img.onload = () => resolve();
+      });
+
+      const width = pdf.internal.pageSize.getWidth();
+      const height = (img.height * width) / img.width;
+      pdf.addImage(img, "JPEG", 0, 0, width, height);
+    }
+
+    // Page 2: Blockchain certificate
+    const canvas = await html2canvas(certificateRef.current, {
+      scale: 3,
       useCORS: true,
     });
-
-    const imgData = canvas.toDataURL("image/png");
-    const pdf = new jsPDF("p", "mm", "a4");
-    const imgProps = pdf.getImageProperties(imgData);
+    const certImg = canvas.toDataURL("image/png");
+    pdf.addPage();
+    const imgProps = pdf.getImageProperties(certImg);
     const pdfWidth = pdf.internal.pageSize.getWidth();
     const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+    pdf.addImage(certImg, "PNG", 0, 0, pdfWidth, pdfHeight);
 
-    pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, pdfHeight);
-    pdf.save("verified-certificate.pdf");
+    pdf.save("combined-certificate.pdf");
   };
 
   useEffect(() => {
@@ -116,8 +132,11 @@ function VerifyPage() {
             <h4>📄 Verify using file:</h4>
             <input
               type="file"
+              accept=".pdf,image/*"
               onChange={(e) => {
-                setFile(e.target.files[0]);
+                const uploadedFile = e.target.files[0];
+                setFile(uploadedFile);
+                setFileURL(URL.createObjectURL(uploadedFile));
                 setStatus("");
                 setStudent(null);
               }}
@@ -145,6 +164,21 @@ function VerifyPage() {
 
       <p>{status}</p>
 
+      {fileURL && (
+        <div style={{ marginTop: 30 }}>
+          <h3>📄 Uploaded Marksheet Preview</h3>
+          {file?.type.startsWith("image/") ? (
+            <img
+              src={fileURL}
+              alt="Uploaded"
+              style={{ width: "50px", border: "1px solid #ccc" }}
+            />
+          ) : (
+            <iframe src={fileURL} title="PDF Preview" width="600" height="600"></iframe>
+          )}
+        </div>
+      )}
+
       {student && (
         <div>
           <div
@@ -160,14 +194,11 @@ function VerifyPage() {
               margin: "auto"
             }}
           >
-            {/* Logo & Title */}
-      
+            
             <h2 style={{ marginBottom: "0", color: "#333" }}>Blockchain Certificate</h2>
             <p style={{ fontStyle: "italic", color: "#777" }}>Accredited Certificate of Achievement</p>
-
             <hr style={{ margin: "20px 0", borderColor: "#ccc" }} />
 
-            {/* Body */}
             <h1 style={{ margin: "30px 0 10px", fontSize: "28px", color: "#222" }}>
               Verified Certificate
             </h1>
@@ -180,7 +211,6 @@ function VerifyPage() {
 
             <hr style={{ margin: "30px 0", borderColor: "#ccc" }} />
 
-            {/* Footer */}
             <p style={{ fontSize: "12px", color: "#555" }}>
               Blockchain Verification Hash:
               <br />
@@ -208,7 +238,7 @@ function VerifyPage() {
                 cursor: "pointer",
               }}
             >
-              📥 Download Verified Certificate
+              📥 Download Certificate
             </button>
           </div>
         </div>

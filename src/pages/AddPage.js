@@ -3,6 +3,9 @@ import { ethers } from "ethers";
 import DocVerify from "../contracts/DocVerify.json";
 import { QRCodeCanvas } from "qrcode.react";
 
+
+
+
 const contractAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3"; // 🔁 Replace with deployed address
 
 function AddPage() {
