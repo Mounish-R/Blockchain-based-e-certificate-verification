@@ -3,10 +3,8 @@ import { ethers } from "ethers";
 import DocVerify from "../contracts/DocVerify.json";
 import { QRCodeCanvas } from "qrcode.react";
 
-
-
-
 const contractAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3"; // 🔁 Replace with deployed address
+const hardhatChainId = "0x7A69"; // 31337 in hex
 
 function AddPage() {
   const [file, setFile] = useState(null);
@@ -15,6 +13,48 @@ function AddPage() {
   const [name, setName] = useState("");
   const [degree, setDegree] = useState("");
   const [year, setYear] = useState("");
+
+  // ✅ Function: Switch MetaMask to Localhost 31337
+  const switchToLocalhost = async () => {
+    if (!window.ethereum) {
+      alert("MetaMask is required");
+      return false;
+    }
+    try {
+      await window.ethereum.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: hardhatChainId }],
+      });
+      return true;
+    } catch (error) {
+      // If Hardhat network not added, add it
+      if (error.code === 4902) {
+        try {
+          await window.ethereum.request({
+            method: "wallet_addEthereumChain",
+            params: [
+              {
+                chainId: hardhatChainId,
+                chainName: "Hardhat Localhost",
+                rpcUrls: ["http://127.0.0.1:8545"],
+                nativeCurrency: {
+                  name: "Ether",
+                  symbol: "ETH",
+                  decimals: 18,
+                },
+              },
+            ],
+          });
+          return true;
+        } catch (addError) {
+          console.error("Error adding localhost chain:", addError);
+          return false;
+        }
+      }
+      console.error("Error switching chain:", error);
+      return false;
+    }
+  };
 
   const getFileHash = async (file) => {
     const buffer = await file.arrayBuffer();
@@ -29,6 +69,10 @@ function AddPage() {
       alert("MetaMask is required");
       return null;
     }
+
+    const switched = await switchToLocalhost(); // ✅ Ensure network is correct
+    if (!switched) return null;
+
     await window.ethereum.request({ method: "eth_requestAccounts" });
     const provider = new ethers.providers.Web3Provider(window.ethereum);
     return provider.getSigner();
@@ -59,14 +103,16 @@ function AddPage() {
 
   return (
     <div style={{ display: "flex", justifyContent: "center", padding: "40px" }}>
-      <div style={{
-        maxWidth: "500px",
-        width: "100%",
-        backgroundColor: "#f9f9f9",
-        padding: "30px",
-        borderRadius: "12px",
-        boxShadow: "0 4px 12px rgba(0,0,0,0.1)"
-      }}>
+      <div
+        style={{
+          maxWidth: "500px",
+          width: "100%",
+          backgroundColor: "#f9f9f9",
+          padding: "30px",
+          borderRadius: "12px",
+          boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+        }}
+      >
         <h1 style={{ textAlign: "center", color: "#333" }}>➕ Add Certificate</h1>
         <p style={{ textAlign: "center", color: "#555", marginBottom: "30px" }}>
           Fill in the student details and upload a certificate to record it on the blockchain.
@@ -74,38 +120,65 @@ function AddPage() {
 
         {/* 🧾 Step 1: Enter Student Info */}
         <div style={{ marginBottom: "20px" }}>
-          <label><strong>👤 Student Name:</strong></label><br />
+          <label>
+            <strong>👤 Student Name:</strong>
+          </label>
+          <br />
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #ccc" }}
+            style={{
+              width: "100%",
+              padding: "8px",
+              borderRadius: "6px",
+              border: "1px solid #ccc",
+            }}
           />
         </div>
 
         <div style={{ marginBottom: "20px" }}>
-          <label><strong>🎓 Degree:</strong></label><br />
+          <label>
+            <strong>🎓 Degree:</strong>
+          </label>
+          <br />
           <input
             type="text"
             value={degree}
             onChange={(e) => setDegree(e.target.value)}
-            style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #ccc" }}
+            style={{
+              width: "100%",
+              padding: "8px",
+              borderRadius: "6px",
+              border: "1px solid #ccc",
+            }}
           />
         </div>
 
         <div style={{ marginBottom: "20px" }}>
-          <label><strong>📅 Year:</strong></label><br />
+          <label>
+            <strong>📅 Year:</strong>
+          </label>
+          <br />
           <input
             type="text"
             value={year}
             onChange={(e) => setYear(e.target.value)}
-            style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #ccc" }}
+            style={{
+              width: "100%",
+              padding: "8px",
+              borderRadius: "6px",
+              border: "1px solid #ccc",
+            }}
           />
         </div>
 
         {/* 📄 Step 2: Upload Certificate File */}
         <div style={{ marginBottom: "20px" }}>
-          <label><strong>📁 Upload Certificate File:</strong></label><br />
+          <label>
+            <strong>📁 Upload Certificate File:</strong>
+          </label>
+          <br />
           <input
             type="file"
             onChange={(e) => {
@@ -128,7 +201,7 @@ function AddPage() {
             fontWeight: "bold",
             border: "none",
             borderRadius: "8px",
-            cursor: "pointer"
+            cursor: "pointer",
           }}
         >
           🚀 Upload to Blockchain
@@ -136,7 +209,14 @@ function AddPage() {
 
         {/* ℹ️ Status Message */}
         {status && (
-          <p style={{ marginTop: "20px", textAlign: "center", fontWeight: "bold", color: status.includes("✅") ? "green" : "red" }}>
+          <p
+            style={{
+              marginTop: "20px",
+              textAlign: "center",
+              fontWeight: "bold",
+              color: status.includes("✅") ? "green" : "red",
+            }}
+          >
             {status}
           </p>
         )}
@@ -150,7 +230,13 @@ function AddPage() {
               size={200}
               includeMargin
             />
-            <p style={{ fontSize: "12px", wordBreak: "break-word", marginTop: "10px" }}>
+            <p
+              style={{
+                fontSize: "12px",
+                wordBreak: "break-word",
+                marginTop: "10px",
+              }}
+            >
               {qrHash}
             </p>
           </div>

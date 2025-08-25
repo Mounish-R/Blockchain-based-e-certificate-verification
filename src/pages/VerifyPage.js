@@ -6,14 +6,13 @@ import { QRCodeCanvas } from "qrcode.react";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 
-
-
-const contractAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3"; // Replace with your deployed address
+const contractAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3"; // Deployed contract
 
 function VerifyPage() {
   const [file, setFile] = useState(null);
-  const [fileURL, setFileURL] = useState(null); // Preview uploaded file
+  const [fileURL, setFileURL] = useState(null);
   const [status, setStatus] = useState("");
+  const [loading, setLoading] = useState(false);
   const [student, setStudent] = useState(null);
   const [manualHash, setManualHash] = useState("");
   const certificateRef = useRef();
@@ -21,6 +20,7 @@ function VerifyPage() {
   const query = new URLSearchParams(useLocation().search);
   const hashFromQR = query.get("hash");
 
+  // ✅ Compute file SHA-256 hash
   const getFileHash = async (file) => {
     const buffer = await file.arrayBuffer();
     const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
@@ -29,22 +29,42 @@ function VerifyPage() {
     return "0x" + hashHex;
   };
 
+  // ✅ Connect signer and force localhost network
   const getSigner = async () => {
     if (!window.ethereum) {
       alert("MetaMask is required");
       return null;
     }
     await window.ethereum.request({ method: "eth_requestAccounts" });
+
+    // Force switch to localhost (Hardhat)
+    try {
+      await window.ethereum.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: "0x7A69" }], // 31337 in hex
+      });
+    } catch (switchError) {
+      console.error("Switch network error:", switchError);
+    }
+
     const provider = new ethers.providers.Web3Provider(window.ethereum);
     return provider.getSigner();
   };
 
+  // ✅ Verify hash against blockchain
   const verifyHash = async (hash) => {
+    if (!hash) {
+      setStatus("❌ No hash provided.");
+      return;
+    }
+
     const signer = await getSigner();
     if (!signer) return;
 
     const contract = new ethers.Contract(contractAddress, DocVerify.abi, signer);
+
     try {
+      setLoading(true);
       const isValid = await contract.verifyDocument(hash);
       if (isValid) {
         const studentData = await contract.getStudentDetails(hash);
@@ -63,6 +83,8 @@ function VerifyPage() {
       setStatus("❌ Error verifying certificate.");
       setStudent(null);
       console.error(err);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -80,10 +102,10 @@ function VerifyPage() {
     verifyHash(manualHash);
   };
 
+  // ✅ Download combined PDF
   const downloadPDF = async () => {
     const pdf = new jsPDF("p", "mm", "a4");
 
-    // Page 1: Uploaded file (image or note)
     if (file && file.type.startsWith("image/")) {
       const img = new Image();
       img.src = fileURL;
@@ -96,7 +118,6 @@ function VerifyPage() {
       pdf.addImage(img, "JPEG", 0, 0, width, height);
     }
 
-    // Page 2: Blockchain certificate
     const canvas = await html2canvas(certificateRef.current, {
       scale: 3,
       useCORS: true,
@@ -118,7 +139,7 @@ function VerifyPage() {
   }, [hashFromQR]);
 
   return (
-    <div className="page" style={{ padding: "40px" }}>
+    <div className="page" style={{ padding: "40px", textAlign: "center" }}>
       <h1>🔍 Verify Certificate</h1>
 
       {hashFromQR ? (
@@ -141,7 +162,9 @@ function VerifyPage() {
                 setStudent(null);
               }}
             />
-            <button onClick={handleManualVerify}>Verify File</button>
+            <button onClick={handleManualVerify} style={{ marginLeft: "10px" }}>
+              Verify File
+            </button>
           </div>
 
           <div style={{ marginTop: 20 }}>
@@ -157,24 +180,28 @@ function VerifyPage() {
               placeholder="Paste blockchain hash here"
               style={{ width: "350px" }}
             />
-            <button onClick={handleHashVerify}>Verify Hash</button>
+            <button onClick={handleHashVerify} style={{ marginLeft: "10px" }}>
+              Verify Hash
+            </button>
           </div>
         </>
       )}
 
-      <p>{status}</p>
+      <p style={{ fontWeight: "bold", marginTop: "20px" }}>
+        {loading ? "⏳ Verifying..." : status}
+      </p>
 
       {fileURL && (
         <div style={{ marginTop: 30 }}>
-          <h3>📄 Uploaded Marksheet Preview</h3>
+          <h3>📄 Uploaded Document Preview</h3>
           {file?.type.startsWith("image/") ? (
             <img
               src={fileURL}
               alt="Uploaded"
-              style={{ width: "50px", border: "1px solid #ccc" }}
+              style={{ width: "250px", border: "1px solid #ccc" }}
             />
           ) : (
-            <iframe src={fileURL} title="PDF Preview" width="600" height="600"></iframe>
+            <iframe src={fileURL} title="PDF Preview" width="500" height="500"></iframe>
           )}
         </div>
       )}
@@ -187,16 +214,20 @@ function VerifyPage() {
               padding: "40px",
               border: "6px double #444",
               marginTop: 30,
-              width: "500px",
+              width: "600px",
               backgroundColor: "#fdfdfd",
               textAlign: "center",
               fontFamily: "'Georgia', serif",
-              margin: "auto"
+              margin: "auto",
+              boxShadow: "0px 4px 12px rgba(0,0,0,0.2)",
             }}
           >
-            
-            <h2 style={{ marginBottom: "0", color: "#333" }}>Blockchain Certificate</h2>
-            <p style={{ fontStyle: "italic", color: "#777" }}>Accredited Certificate of Achievement</p>
+            <h2 style={{ marginBottom: "0", color: "#333" }}>
+              Blockchain Certificate
+            </h2>
+            <p style={{ fontStyle: "italic", color: "#777" }}>
+              Accredited Certificate of Achievement
+            </p>
             <hr style={{ margin: "20px 0", borderColor: "#ccc" }} />
 
             <h1 style={{ margin: "30px 0 10px", fontSize: "28px", color: "#222" }}>
@@ -205,7 +236,8 @@ function VerifyPage() {
             <p>This is to certify that</p>
             <h2 style={{ margin: "10px 0", color: "#000" }}>{student.name}</h2>
             <p>
-              has successfully completed the degree of <strong>{student.degree}</strong> <br />
+              has successfully completed the degree of{" "}
+              <strong>{student.degree}</strong> <br />
               in the year <strong>{student.year}</strong>.
             </p>
 
@@ -214,7 +246,9 @@ function VerifyPage() {
             <p style={{ fontSize: "12px", color: "#555" }}>
               Blockchain Verification Hash:
               <br />
-              <span style={{ wordBreak: "break-word", fontSize: "10px" }}>{student.hash}</span>
+              <span style={{ wordBreak: "break-word", fontSize: "10px" }}>
+                {student.hash}
+              </span>
             </p>
             <QRCodeCanvas
               value={`http://localhost:3000/verify?hash=${student.hash}`}
@@ -225,7 +259,7 @@ function VerifyPage() {
           </div>
 
           <br />
-          <div style={{ textAlign: "center" }}>
+          <div>
             <button
               onClick={downloadPDF}
               style={{
