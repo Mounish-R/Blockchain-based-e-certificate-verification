@@ -6,7 +6,7 @@ import { QRCodeCanvas } from "qrcode.react";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 
-const contractAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3"; // Deployed contract
+const contractAddress = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"; // update after redeploy
 
 function VerifyPage() {
   const [file, setFile] = useState(null);
@@ -20,7 +20,6 @@ function VerifyPage() {
   const query = new URLSearchParams(useLocation().search);
   const hashFromQR = query.get("hash");
 
-  // ✅ Compute file SHA-256 hash
   const getFileHash = async (file) => {
     const buffer = await file.arrayBuffer();
     const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
@@ -29,29 +28,21 @@ function VerifyPage() {
     return "0x" + hashHex;
   };
 
-  // ✅ Connect signer and force localhost network
   const getSigner = async () => {
     if (!window.ethereum) {
       alert("MetaMask is required");
       return null;
     }
     await window.ethereum.request({ method: "eth_requestAccounts" });
-
-    // Force switch to localhost (Hardhat)
     try {
-      await window.ethereum.request({
-        method: "wallet_switchEthereumChain",
-        params: [{ chainId: "0x7A69" }], // 31337 in hex
-      });
+      await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x7A69" }] });
     } catch (switchError) {
       console.error("Switch network error:", switchError);
     }
-
     const provider = new ethers.providers.Web3Provider(window.ethereum);
     return provider.getSigner();
   };
 
-  // ✅ Verify hash against blockchain
   const verifyHash = async (hash) => {
     if (!hash) {
       setStatus("❌ No hash provided.");
@@ -67,12 +58,21 @@ function VerifyPage() {
       setLoading(true);
       const isValid = await contract.verifyDocument(hash);
       if (isValid) {
+        // The contract returns many strings in same order as struct
         const studentData = await contract.getStudentDetails(hash);
         setStudent({
           hash,
-          name: studentData[0],
-          degree: studentData[1],
-          year: studentData[2],
+          fullName: studentData[0],
+          dob: studentData[1],
+          gender: studentData[2],
+          physicalAddress: studentData[3],
+          phone: studentData[4],
+          email: studentData[5],
+          aadhaar: studentData[6],
+          pan: studentData[7],
+          passport: studentData[8],
+          drivingLicense: studentData[9],
+          voterId: studentData[10],
         });
         setStatus("✅ Certificate is VALID.");
       } else {
@@ -102,26 +102,19 @@ function VerifyPage() {
     verifyHash(manualHash);
   };
 
-  // ✅ Download combined PDF
   const downloadPDF = async () => {
     const pdf = new jsPDF("p", "mm", "a4");
 
     if (file && file.type.startsWith("image/")) {
       const img = new Image();
       img.src = fileURL;
-      await new Promise((resolve) => {
-        img.onload = () => resolve();
-      });
-
+      await new Promise((resolve) => { img.onload = () => resolve(); });
       const width = pdf.internal.pageSize.getWidth();
       const height = (img.height * width) / img.width;
       pdf.addImage(img, "JPEG", 0, 0, width, height);
     }
 
-    const canvas = await html2canvas(certificateRef.current, {
-      scale: 3,
-      useCORS: true,
-    });
+    const canvas = await html2canvas(certificateRef.current, { scale: 3, useCORS: true });
     const certImg = canvas.toDataURL("image/png");
     pdf.addPage();
     const imgProps = pdf.getImageProperties(certImg);
@@ -140,7 +133,7 @@ function VerifyPage() {
 
   return (
     <div className="page" style={{ padding: "40px", textAlign: "center" }}>
-      <h1>🔍 Verify Certificate</h1>
+      <h1>🔍 Verify Certificate / KYC</h1>
 
       {hashFromQR ? (
         <>
@@ -151,55 +144,25 @@ function VerifyPage() {
         <>
           <div>
             <h4>📄 Verify using file:</h4>
-            <input
-              type="file"
-              accept=".pdf,image/*"
-              onChange={(e) => {
-                const uploadedFile = e.target.files[0];
-                setFile(uploadedFile);
-                setFileURL(URL.createObjectURL(uploadedFile));
-                setStatus("");
-                setStudent(null);
-              }}
-            />
-            <button onClick={handleManualVerify} style={{ marginLeft: "10px" }}>
-              Verify File
-            </button>
+            <input type="file" accept=".pdf,image/*" onChange={(e)=>{ const uploadedFile = e.target.files[0]; setFile(uploadedFile); setFileURL(URL.createObjectURL(uploadedFile)); setStatus(""); setStudent(null); }} />
+            <button onClick={handleManualVerify} style={{ marginLeft: "10px" }}>Verify File</button>
           </div>
 
           <div style={{ marginTop: 20 }}>
             <h4>🔑 Verify using Blockchain Hash:</h4>
-            <input
-              type="text"
-              value={manualHash}
-              onChange={(e) => {
-                setManualHash(e.target.value);
-                setStatus("");
-                setStudent(null);
-              }}
-              placeholder="Paste blockchain hash here"
-              style={{ width: "350px" }}
-            />
-            <button onClick={handleHashVerify} style={{ marginLeft: "10px" }}>
-              Verify Hash
-            </button>
+            <input type="text" value={manualHash} onChange={(e)=>{ setManualHash(e.target.value); setStatus(""); setStudent(null); }} placeholder="Paste blockchain hash here" style={{ width: "350px" }} />
+            <button onClick={handleHashVerify} style={{ marginLeft: "10px" }}>Verify Hash</button>
           </div>
         </>
       )}
 
-      <p style={{ fontWeight: "bold", marginTop: "20px" }}>
-        {loading ? "⏳ Verifying..." : status}
-      </p>
+      <p style={{ fontWeight: "bold", marginTop: "20px" }}>{loading ? "⏳ Verifying..." : status}</p>
 
       {fileURL && (
         <div style={{ marginTop: 30 }}>
           <h3>📄 Uploaded Document Preview</h3>
           {file?.type.startsWith("image/") ? (
-            <img
-              src={fileURL}
-              alt="Uploaded"
-              style={{ width: "250px", border: "1px solid #ccc" }}
-            />
+            <img src={fileURL} alt="Uploaded" style={{ width: "250px", border: "1px solid #ccc" }} />
           ) : (
             <iframe src={fileURL} title="PDF Preview" width="500" height="500"></iframe>
           )}
@@ -208,70 +171,36 @@ function VerifyPage() {
 
       {student && (
         <div>
-          <div
-            ref={certificateRef}
-            style={{
-              padding: "40px",
-              border: "6px double #444",
-              marginTop: 30,
-              width: "600px",
-              backgroundColor: "#fdfdfd",
-              textAlign: "center",
-              fontFamily: "'Georgia', serif",
-              margin: "auto",
-              boxShadow: "0px 4px 12px rgba(0,0,0,0.2)",
-            }}
-          >
-            <h2 style={{ marginBottom: "0", color: "#333" }}>
-              Blockchain Certificate
-            </h2>
-            <p style={{ fontStyle: "italic", color: "#777" }}>
-              Accredited Certificate of Achievement
-            </p>
-            <hr style={{ margin: "20px 0", borderColor: "#ccc" }} />
+          <div ref={certificateRef} style={{ padding: "30px", border: "4px double #444", marginTop: 30, width: "700px", backgroundColor: "#fff", textAlign: "left", fontFamily: "'Georgia', serif", margin: "auto" }}>
+            <h2 style={{ textAlign: "center" }}>Blockchain Verified Identity / Certificate</h2>
+            <hr />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <div><strong>Full Name:</strong><div>{student.fullName}</div></div>
+              <div><strong>DOB:</strong><div>{student.dob}</div></div>
+              <div><strong>Gender:</strong><div>{student.gender}</div></div>
+              <div><strong>Phone:</strong><div>{student.phone}</div></div>
+              <div style={{ gridColumn: "1 / -1" }}><strong>Address:</strong><div>{student.physicalAddress}</div></div>
+              <div><strong>Email:</strong><div>{student.email}</div></div>
+              <div><strong>Aadhaar:</strong><div>{student.aadhaar}</div></div>
+              <div><strong>PAN:</strong><div>{student.pan}</div></div>
+              <div><strong>Passport:</strong><div>{student.passport}</div></div>
+              <div><strong>Driving License:</strong><div>{student.drivingLicense}</div></div>
+              <div><strong>Voter ID:</strong><div>{student.voterId}</div></div>
+            </div>
 
-            <h1 style={{ margin: "30px 0 10px", fontSize: "28px", color: "#222" }}>
-              Verified Certificate
-            </h1>
-            <p>This is to certify that</p>
-            <h2 style={{ margin: "10px 0", color: "#000" }}>{student.name}</h2>
-            <p>
-              has successfully completed the degree of{" "}
-              <strong>{student.degree}</strong> <br />
-              in the year <strong>{student.year}</strong>.
-            </p>
+            <hr style={{ marginTop: 16 }} />
 
-            <hr style={{ margin: "30px 0", borderColor: "#ccc" }} />
-
-            <p style={{ fontSize: "12px", color: "#555" }}>
-              Blockchain Verification Hash:
-              <br />
-              <span style={{ wordBreak: "break-word", fontSize: "10px" }}>
-                {student.hash}
-              </span>
-            </p>
-            <QRCodeCanvas
-              value={`http://localhost:3000/verify?hash=${student.hash}`}
-              size={100}
-              includeMargin
-            />
-            <p style={{ fontSize: "10px", marginTop: "5px" }}>Scan QR to verify</p>
+            <div style={{ textAlign: "center", marginTop: 10 }}>
+              <p style={{ fontSize: 12 }}>Blockchain Verification Hash:</p>
+              <p style={{ wordBreak: "break-word", fontSize: 10 }}>{student.hash}</p>
+              <QRCodeCanvas value={`http://localhost:3000/verify?hash=${student.hash}`} size={100} includeMargin />
+              <p style={{ fontSize: 10 }}>Scan QR to verify</p>
+            </div>
           </div>
 
           <br />
           <div>
-            <button
-              onClick={downloadPDF}
-              style={{
-                backgroundColor: "#4CAF50",
-                color: "white",
-                padding: "10px 20px",
-                fontSize: "16px",
-                border: "none",
-                borderRadius: "6px",
-                cursor: "pointer",
-              }}
-            >
+            <button onClick={downloadPDF} style={{ backgroundColor: "#4CAF50", color: "white", padding: "10px 20px", fontSize: "16px", border: "none", borderRadius: "6px", cursor: "pointer" }}>
               📥 Download Certificate
             </button>
           </div>
