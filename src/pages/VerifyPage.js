@@ -1,3 +1,4 @@
+// CMD: Imports (NO CHANGE)
 import React, { useState, useEffect, useRef } from "react";
 import { ethers } from "ethers";
 import DocVerify from "../contracts/DocVerify.json";
@@ -5,308 +6,426 @@ import { useLocation } from "react-router-dom";
 import { QRCodeCanvas } from "qrcode.react";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
+import * as XLSX from "xlsx";
 
 const contractAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
 
 export default function VerifyPage() {
+  // CMD: STATES
   const [file, setFile] = useState(null);
   const [fileURL, setFileURL] = useState(null);
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
   const [student, setStudent] = useState(null);
-  const [manualHash, setManualHash] = useState("");
-  const certificateRef = useRef();
 
+  const [manualHashes, setManualHashes] = useState("");
+  const [multiResults, setMultiResults] = useState([]);
+
+  const [excelData, setExcelData] = useState([]);
+  const [excelResults, setExcelResults] = useState([]);
+
+  const certificateRef = useRef();
   const query = new URLSearchParams(useLocation().search);
   const hashFromQR = query.get("hash");
 
-  // Helpers (unchanged blockchain-related)
+  // CMD: CLEAN HASH
+  const cleanHash = (h) => {
+    if (!h) return "";
+    h = String(h).trim();
+
+    if (!h.startsWith("0x") && h.length === 64 && /^[0-9a-fA-F]+$/.test(h)) {
+      return "0x" + h;
+    }
+    if (h.toLowerCase().includes("e")) {
+      try {
+        const big = window.BigInt(h);
+        return "0x" + big.toString(16).padStart(64, "0");
+      } catch {}
+    }
+    return h;
+  };
+
+  // CMD: FILE HASH
   const getFileHash = async (file) => {
     const buffer = await file.arrayBuffer();
     const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    const hashHex = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
-    return "0x" + hashHex;
+    const hex = Array.from(new Uint8Array(hashBuffer))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+    return "0x" + hex;
   };
 
+  // CMD: SIGNER
   const getSigner = async () => {
-    if (!window.ethereum) {
-      alert("MetaMask required");
-      return null;
-    }
+    if (!window.ethereum) return null;
+
     await window.ethereum.request({ method: "eth_requestAccounts" });
+
     try {
-      await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x7A69" }] });
-    } catch (e) {
-      /* ignore */
-    }
+      await window.ethereum.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: "0x7A69" }],
+      });
+    } catch {}
+
     const provider = new ethers.providers.Web3Provider(window.ethereum);
     return provider.getSigner();
   };
 
+  // CMD: VERIFY HASH
   const verifyHash = async (hash) => {
-    if (!hash) {
-      setStatus("❌ No hash provided.");
-      return;
-    }
+    setExcelResults([]);
+    setMultiResults([]);
+
+    if (!hash) return setStatus("❌ No hash provided");
+
     const signer = await getSigner();
     if (!signer) return;
+
     const contract = new ethers.Contract(contractAddress, DocVerify.abi, signer);
 
     try {
       setLoading(true);
-      setStatus("⏳ Verifying on blockchain...");
+      setStatus("⏳ Verifying...");
+
       const isValid = await contract.verifyDocument(hash);
+
       if (isValid) {
-        const studentData = await contract.getStudentDetails(hash);
-        // attach a verifiedAt timestamp (client time). Safe fallback if missing.
-        const verifiedAt = new Date().toISOString();
+        const data = await contract.getStudentDetails(hash);
+
         setStudent({
           hash,
-          // Map contract return values (expected order must match your contract)
-          fullName: studentData[0] || "",
-          dob: studentData[1] || "",
-          gender: studentData[2] || "",
-          physicalAddress: studentData[3] || "",
-          phone: studentData[4] || "",
-          email: studentData[5] || "",
-          aadhaar: studentData[6] || "",
-          pan: studentData[7] || "",
-          passport: studentData[8] || "",
-          drivingLicense: studentData[9] || "",
-          voterId: studentData[10] || "",
-          // extra (if you store a 'degree' or others adjust accordingly)
-          verifiedAt,
+          fullName: data[0],
+          dob: data[1],
+          gender: data[2],
+          physicalAddress: data[3],
+          phone: data[4],
+          email: data[5],
+          aadhaar: data[6],
+          pan: data[7],
+          passport: data[8],
+          drivingLicense: data[9],
+          voterId: data[10],
+          verifiedAt: new Date().toISOString(),
         });
-        setStatus("✅ Certificate is VALID.");
+
+        setStatus("✅ Certificate is VALID");
       } else {
-        setStatus("❌ Certificate is INVALID.");
         setStudent(null);
+        setStatus("❌ INVALID hash");
       }
-    } catch (err) {
-      setStatus("❌ Error verifying certificate.");
-      setStudent(null);
-      console.error(err);
+    } catch {
+      setStatus("❌ Verification error");
     } finally {
       setLoading(false);
     }
   };
 
+  // CMD: MULTI VERIFY
+  const handleMultiHashVerify = async () => {
+    setStudent(null);
+    setExcelResults([]);
+
+    const signer = await getSigner();
+    if (!signer) return;
+
+    const contract = new ethers.Contract(contractAddress, DocVerify.abi, signer);
+
+    const hashes = manualHashes
+      .split(/[\s,]+/)
+      .map(cleanHash)
+      .filter((h) => h);
+
+    let results = [];
+
+    for (let h of hashes) {
+      if (!h.startsWith("0x") || h.length !== 66) {
+        results.push({ hash: h, valid: false });
+        continue;
+      }
+
+      try {
+        const valid = await contract.verifyDocument(h);
+        results.push({ hash: h, valid });
+      } catch {
+        results.push({ hash: h, valid: false });
+      }
+    }
+
+    setMultiResults(results);
+    setStatus(results.every((r) => r.valid) ? "✅ All Valid" : "⚠ Some Invalid");
+  };
+
+  // CMD: EXCEL UPLOAD
+  const handleExcelUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const wb = XLSX.read(event.target.result, { type: "array" });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+
+      const json = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+      const rows = json.slice(1).map((r) => ({
+        name: r[0],
+        hash: cleanHash(r[1]),
+      }));
+      setExcelData(rows);
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  // CMD: VERIFY EXCEL
+  const verifyExcelHashes = async () => {
+    setStudent(null);
+    setMultiResults([]);
+
+    const signer = await getSigner();
+    if (!signer) return;
+
+    const contract = new ethers.Contract(contractAddress, DocVerify.abi, signer);
+
+    let results = [];
+
+    for (let row of excelData) {
+      const { name, hash } = row;
+
+      if (!hash.startsWith("0x") || hash.length !== 66) {
+        results.push({ name, hash, valid: false });
+        continue;
+      }
+
+      try {
+        const valid = await contract.verifyDocument(hash);
+        results.push({ name, hash, valid });
+      } catch {
+        results.push({ name, hash, valid: false });
+      }
+    }
+
+    setExcelResults(results);
+    setStatus(results.every((r) => r.valid) ? "✅ All Excel Valid" : "⚠ Some Excel Invalid");
+  };
+
+  // CMD: FILE VERIFY
   const handleManualVerify = async () => {
     if (!file) return alert("Select a file first");
     const hash = await getFileHash(file);
     verifyHash(hash);
   };
 
-  const handleHashVerify = () => {
-    if (!manualHash.startsWith("0x") || manualHash.length !== 66) {
-      alert("Invalid hash format");
-      return;
-    }
-    verifyHash(manualHash);
-  };
-
-  const downloadPDF = async () => {
-    const pdf = new jsPDF("p", "mm", "a4");
-
-    if (file && file.type.startsWith("image/")) {
-      const img = new Image();
-      img.src = fileURL;
-      await new Promise((resolve) => {
-        img.onload = () => resolve();
-      });
-      const width = pdf.internal.pageSize.getWidth();
-      const height = (img.height * width) / img.width;
-      pdf.addImage(img, "JPEG", 0, 0, width, height);
-    }
-
-    const canvas = await html2canvas(certificateRef.current, { scale: 3, useCORS: true, logging: false });
-    const certImg = canvas.toDataURL("image/png");
-    pdf.addPage();
-    const imgProps = pdf.getImageProperties(certImg);
-    const pdfWidth = pdf.internal.pageSize.getWidth();
-    const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-    pdf.addImage(certImg, "PNG", 0, 0, pdfWidth, pdfHeight);
-
-    pdf.save("verified-certificate.pdf");
-  };
-
+  // CMD: AUTO VERIFY FROM QR
   useEffect(() => {
     if (hashFromQR) verifyHash(hashFromQR);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hashFromQR]);
 
-  // Format helpers (defensive)
-  const fmt = (iso) => {
-    if (!iso) return "—";
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return "—";
-    return d.toLocaleString();
+  // CMD: EXPORT PDF FUNCTION
+  const exportPDF = async () => {
+    if (!student) return alert("No verified certificate!");
+
+    try {
+      const element = certificateRef.current;
+
+      const canvas = await html2canvas(element, { scale: 2 });
+      const imgData = canvas.toDataURL("image/png");
+
+      const pdf = new jsPDF("p", "mm", "a4");
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+
+      pdf.addImage(imgData, "PNG", 0, 10, pdfWidth, pdfHeight);
+
+      pdf.save(`Verified-Certificate-${student.fullName}.pdf`);
+    } catch (err) {
+      console.error(err);
+      alert("PDF export failed");
+    }
   };
 
-  const shortHash = (h) => (h ? `${h.slice(0, 10)}...${h.slice(-6)}` : "—");
-
-  // Styles: grid layout avoids overlap; QR column fixed width
-  const page = { padding: 28, fontFamily: "Georgia, 'Times New Roman', serif", color: "#0b1220" };
-  const header = { textAlign: "center", marginBottom: 12 };
-  const layout = { display: "grid", gridTemplateColumns: "1fr 300px", gap: 22, justifyContent: "center" };
-  const certificateWrapper = {
-    width: "100%", maxWidth: 960, margin: "0 auto", padding: 18,
-    background: "linear-gradient(180deg,#fffdf9 0%, #fffefc 100%)",
-    borderRadius: 6, boxShadow: "0 10px 30px rgba(2,6,23,0.06)"
+  // CMD: UI
+  const ui = {
+    page: {
+      padding: "40px",
+      minHeight: "100vh",
+      background: "#f5f7fa",
+      fontFamily: "Inter, sans-serif",
+    },
+    section: {
+      background: "#fff",
+      padding: "24px",
+      borderRadius: "14px",
+      boxShadow: "0 4px 20px rgba(0,0,0,0.06)",
+      marginBottom: "24px",
+    },
+    heading: {
+      fontSize: "20px",
+      fontWeight: "700",
+      marginBottom: "10px",
+      color: "#1e293b",
+    },
+    sub: {
+      fontSize: "14px",
+      color: "#64748b",
+      marginBottom: "16px",
+    },
+    input: {
+      width: "100%",
+      padding: "12px",
+      borderRadius: "10px",
+      border: "1px solid #d4dce6",
+      fontSize: "14px",
+    },
+    button: {
+      padding: "12px 16px",
+      marginTop: "12px",
+      background: "linear-gradient(90deg,#2563eb,#4f46e5)",
+      color: "#fff",
+      border: "none",
+      borderRadius: "10px",
+      cursor: "pointer",
+      fontWeight: "700",
+      boxShadow: "0 4px 12px rgba(37,99,235,0.25)",
+    },
   };
-
-  const outerBorder = { border: "7px solid #d8cdb3", borderRadius: 8, padding: 10, background: "#fbfaf5" };
-  const innerBorder = { border: "3px solid #efe6d0", borderRadius: 6, padding: 20, minHeight: 520, position: "relative", overflow: "hidden" };
-
-  const titleStyle = { fontSize: 20, fontWeight: 800, letterSpacing: 1.2, color: "#10233b" };
-  const subtitleStyle = { fontSize: 12, color: "#51606a", marginTop: 6 };
-  const nameStyle = { fontSize: 32, fontWeight: 800, color: "#0b1220", margin: "12px 0" };
-  const degreeStyle = { fontSize: 16, color: "#20303f", marginBottom: 6 };
-  const smallMuted = { fontSize: 12, color: "#4b5563" };
-
-  const leftCol = { paddingRight: 6 };
-  const rightCol = { paddingLeft: 6 };
 
   return (
-    <div style={page}>
-      <div style={header}>
-        <h1 style={{ margin: 0 }}>🔍 Verify Certificate / KYC</h1>
-        <div style={{ fontSize: 14, color: "#475569", marginTop: 6 }}>{loading ? "⏳ Verifying..." : status}</div>
+    <div style={ui.page}>
+      <h1 style={{ textAlign: "center", marginBottom: 30 }}>🔍 Verify Certificate</h1>
+      <p style={{ textAlign: "center", fontSize: 16 }}>{loading ? "⏳ Checking..." : status}</p>
+
+      {/* SECTION 1: FILE VERIFY */}
+      <div style={ui.section}>
+        <div style={ui.heading}>📄 Verify Using File</div>
+        <div style={ui.sub}>Upload the original file for verification.</div>
+
+        <input
+          type="file"
+          accept=".pdf,image/*"
+          onChange={(e) => {
+            const f = e.target.files[0];
+            setFile(f);
+            setFileURL(URL.createObjectURL(f));
+          }}
+          style={ui.input}
+        />
+
+        <button style={ui.button} onClick={handleManualVerify}>
+          Verify File
+        </button>
       </div>
 
-      {/* Inputs */}
-      <div style={{ textAlign: "center", marginBottom: 18 }}>
-        {!hashFromQR && (
-          <>
-            <div style={{ marginBottom: 10 }}>
-              <label style={{ marginRight: 8 }}>📄 Verify using file:</label>
-              <input type="file" accept=".pdf,image/*" onChange={(e) => {
-                const uploadedFile = e.target.files[0];
-                setFile(uploadedFile);
-                setFileURL(URL.createObjectURL(uploadedFile));
-                setStatus("");
-                setStudent(null);
-              }} />
-              <button onClick={handleManualVerify} style={{ marginLeft: 8 }}>Verify File</button>
-            </div>
+      {/* SECTION 2: MULTI HASH */}
+      <div style={ui.section}>
+        <div style={ui.heading}>🔗 Verify Multiple Hashes</div>
+        <div style={ui.sub}>Enter multiple hashes separated by space or comma.</div>
 
-            <div>
-              <label style={{ marginRight: 8 }}>🔑 Verify using Blockchain Hash:</label>
-              <input type="text" value={manualHash} onChange={(e) => { setManualHash(e.target.value); setStatus(""); setStudent(null); }} placeholder="Paste blockchain hash here" style={{ width: 360 }} />
-              <button onClick={handleHashVerify} style={{ marginLeft: 8 }}>Verify Hash</button>
-            </div>
-          </>
+        <textarea
+          rows={4}
+          style={{ ...ui.input, height: "110px" }}
+          placeholder="Hash1 Hash2 Hash3..."
+          value={manualHashes}
+          onChange={(e) => setManualHashes(e.target.value)}
+        ></textarea>
+
+        <button style={ui.button} onClick={handleMultiHashVerify}>
+          Verify All
+        </button>
+
+        {multiResults.length > 0 && (
+          <div style={{ marginTop: 15 }}>
+            {multiResults.map((r, i) => (
+              <div
+                key={i}
+                style={{
+                  padding: "10px",
+                  borderRadius: "8px",
+                  background: r.valid ? "#eaffea" : "#ffeaea",
+                  marginBottom: "6px",
+                }}
+              >
+                {r.valid ? `✔ VALID → ${r.hash}` : `❌ INVALID → ${r.hash}`}
+              </div>
+            ))}
+          </div>
         )}
       </div>
 
-      {/* Main layout */}
-      <div style={layout}>
-        {/* Left: certificate area */}
-        <div style={leftCol}>
-          {fileURL && (
-            <div style={{ marginBottom: 18, textAlign: "center" }}>
-              {file?.type.startsWith("image/") ? (<img src={fileURL} alt="Uploaded" style={{ width: 300, border: "1px solid #ccc" }} />) : (<iframe src={fileURL} title="PDF Preview" width="500" height="500"></iframe>)}
-            </div>
-          )}
+      {/* SECTION 3: EXCEL VERIFY */}
+      <div style={ui.section}>
+        <div style={ui.heading}>🏢 Organization Mode — Excel Verification</div>
+        <div style={ui.sub}>Upload Excel with Name and Hash columns.</div>
 
-          {student && (
-            <div ref={certificateRef} style={certificateWrapper}>
-              <div style={outerBorder}>
-                <div style={innerBorder}>
-                  {/* header */}
-                  <div style={{ textAlign: "center", paddingTop: 6 }}>
-                    <div style={titleStyle}>Certificate of Verification</div>
-                    <div style={subtitleStyle}>This document certifies that the following identity record has been verified on the blockchain.</div>
-                  </div>
+        <input
+          type="file"
+          accept=".xlsx,.xls,.csv"
+          onChange={handleExcelUpload}
+          style={ui.input}
+        />
 
-                  {/* body - use columns to avoid overlap */}
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginTop: 18 }}>
-                    <div>
-                      <div style={{ fontSize: 13, color: "#334155", fontWeight: 700 }}>This is to certify that</div>
-                      <div style={nameStyle}>{student.fullName || "—"}</div>
+        <button style={ui.button} onClick={verifyExcelHashes}>
+          Verify Excel
+        </button>
 
-                      <div style={degreeStyle}>has successfully recorded their identity details</div>
-
-                      {/* show all fields clearly */}
-                      <div style={{ marginTop: 12, ...smallMuted, lineHeight: 1.6 }}>
-                        <div><strong>Date of Birth:</strong> {student.dob || "—"}</div>
-                        <div><strong>Gender:</strong> {student.gender || "—"}</div>
-                        <div><strong>Address:</strong> {student.physicalAddress || "—"}</div>
-                        <div><strong>Phone:</strong> {student.phone || "—"}</div>
-                        <div><strong>Email:</strong> {student.email || "—"}</div>
-                        <div><strong>Aadhaar:</strong> {student.aadhaar || "—"}</div>
-                        <div><strong>PAN:</strong> {student.pan || "—"}</div>
-                        <div><strong>Passport:</strong> {student.passport || "—"}</div>
-                        <div><strong>Driving License:</strong> {student.drivingLicense || "—"}</div>
-                        <div><strong>Voter ID:</strong> {student.voterId || "—"}</div>
-                      </div>
-                    </div>
-
-                    {/* right side inside certificate: QR + compact fields */}
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 12 }}>
-                      <div style={{ background: "#fff", padding: 12, borderRadius: 10, alignSelf: "center" }}>
-                        <QRCodeCanvas value={`http://localhost:3000/verify?hash=${student.hash}`} size={150} includeMargin />
-                      </div>
-
-                      <div style={{ fontSize: 12, color: "#475569", wordBreak: "break-word" }}>{shortHash(student.hash)}</div>
-
-                      <div style={{ marginTop: 6, fontSize: 12, color: "#6b7280" }}>
-                        <div><strong>Certificate ID</strong></div>
-                        <div style={{ fontFamily: "monospace", marginTop: 6 }}>{student.hash || "—"}</div>
-                      </div>
-
-                      <div style={{ marginTop: 8, fontSize: 12, color: "#6b7280" }}>
-                        <div><strong>Digital verification</strong></div>
-                        <div style={{ marginTop: 6 }}>{fmt(student.verifiedAt)}</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* signature line only (no words) */}
-                  <div style={{ marginTop: 26, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <div style={{ borderTop: "2px solid #cfc0a7", width: 220, height: 0 }} />
-                    <div style={{ textAlign: "right", fontSize: 11, color: "#6b7280" }}>{/* empty signature area */}</div>
-                  </div>
-
-                  {/* footer */}
-                  <div style={{ marginTop: 18, display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: "#6b7280" }}>
-                    <div>Issued by DocVerify • Secure blockchain-backed verification</div>
-                    <div>Digitally signed on {fmt(student.verifiedAt)}</div>
-                  </div>
-                </div>
+        {excelResults.length > 0 && (
+          <div style={{ marginTop: 20 }}>
+            {excelResults.map((r, i) => (
+              <div
+                key={i}
+                style={{
+                  padding: "10px",
+                  borderRadius: "8px",
+                  background: r.valid ? "#eaffea" : "#ffeaea",
+                  marginBottom: "8px",
+                }}
+              >
+                {r.valid
+                  ? `✔ ${r.name} → VALID`
+                  : `❌ ${r.name} → INVALID`}
               </div>
-            </div>
-          )}
-        </div>
+            ))}
+          </div>
+        )}
+      </div>
 
-        {/* Right: compact action column (fixed width) */}
-        <div style={rightCol}>
-          <div style={{ background: "#fbfdff", borderRadius: 10, padding: 14, boxShadow: "0 8px 18px rgba(12,18,44,0.04)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <div style={{ fontSize: 15, fontWeight: 700 }}>Certificate Details</div>
-            </div>
+      {/* SECTION 4: VERIFIED CERTIFICATE */}
+      {student && (
+        <div style={ui.section} ref={certificateRef}>
+          <div style={ui.heading}>🎉 Verified Certificate</div>
 
-            <div style={{ fontSize: 13, color: "#475569", marginBottom: 10 }}>
-              <div><strong>Status:</strong> {loading ? "Verifying..." : (status || "Ready")}</div>
-              <div style={{ marginTop: 8 }}><strong>Hash:</strong><div style={{ wordBreak: "break-all", fontFamily: "monospace", marginTop: 6 }}>{student ? student.hash : "—"}</div></div>
-              <div style={{ marginTop: 8 }}><strong>Verified:</strong> {student ? fmt(student.verifiedAt) : "—"}</div>
-              <div style={{ marginTop: 8 }}><strong>Contact:</strong> support@docverify.local</div>
-            </div>
-
-            {student && (
-              <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={downloadPDF} style={{ flex: 1, padding: "10px 12px", borderRadius: 8, background: "#2563eb", color: "#fff", border: "none", cursor: "pointer" }}>📥 Download</button>
-                <button onClick={() => { if (!student || !student.hash) return; window.open(`/verify?hash=${student.hash}`, "_blank"); }} style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid #e6e9ef", background: "#fff", cursor: "pointer" }}>Open</button>
+          <div style={{ padding: "10px 4px" }}>
+            {Object.entries(student).map(([k, v]) => (
+              <div key={k} style={{ marginBottom: 10 }}>
+                <strong style={{ textTransform: "capitalize" }}>{k}:</strong>
+                <br />
+                {String(v)}
               </div>
-            )}
+            ))}
+          </div>
 
-            <div style={{ marginTop: 12, fontSize: 12, color: "#94a3b8" }}>
-              Recent verification is stored only in your browser session.
-            </div>
+          <div style={{ textAlign: "center", marginTop: 20 }}>
+            <QRCodeCanvas value={student.hash} size={180} />
+          </div>
+
+          <div style={{ textAlign: "center", marginTop: 25 }}>
+            <button
+              onClick={exportPDF}
+              style={{
+                padding: "12px 18px",
+                background: "#10b981",
+                color: "white",
+                border: "none",
+                borderRadius: "10px",
+                fontWeight: "700",
+                cursor: "pointer",
+                boxShadow: "0 4px 12px rgba(16,185,129,0.3)",
+              }}
+            >
+              📄 Export PDF
+            </button>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
